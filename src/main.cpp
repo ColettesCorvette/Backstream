@@ -30,13 +30,13 @@ int main(int argc, char* argv[]) {
     
     std::string appDir = getAppDir(argv[0]);
     
-    // Chemin universel (le slash / marche aussi sur Windows)
-    std::string iniPath = appDir + "/settings.ini";
+    // Chemin universel 
+    fs::path iniPath = fs::path(appDir) / "settings.ini";
     
     bool justConfigured = false;
 
-    if (!loadConfig(iniPath)) {
-        createConfigInteractive(iniPath);
+    if (!loadConfig(iniPath.string())) {
+        createConfigInteractive(iniPath.string());
         
         if (REMOTE_IP.empty() || SSH_KEY.empty()) {
              log(-1, "ERROR", "Configuration annulee ou invalide.");
