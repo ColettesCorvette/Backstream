@@ -1,0 +1,7 @@
+This software bundles the Zstandard binary.
+
+Zstandard is dual-licensed under BSD 3-Clause License and GPLv2.
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Source code and full license details available at:
+https://github.com/facebook/zstd
