@@ -1,0 +1,16 @@
+# Ignorer le dossier de build
+build/
+out/
+
+# Ignorer les fichiers système/IDE
+.vscode/
+.vs/
+*.user
+
+# Ignorer les binaires s'ils sont générés à la racine par erreur
+*.exe
+*.pdb
+*.obj
+
+# Mais garder zstd.exe s'il est dans tools/
+!tools/zstd.exe
