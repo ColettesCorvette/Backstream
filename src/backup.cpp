@@ -2,8 +2,21 @@
 #include "config.h"
 #include "utils.h"
 #include "progress.h"
-#include <windows.h>
-#include <io.h>
+
+// --- CROSS-PLATFORM ---
+#ifdef _WIN32
+    #include <windows.h>
+    #include <io.h>
+    #define POPEN _popen
+    #define PCLOSE _pclose
+#else
+    #include <unistd.h>
+    #define POPEN popen
+    #define PCLOSE pclose
+    #include <sys/wait.h> // Pour WEXITSTATUS
+#endif
+// ---------------------------------
+
 #include <csignal>
 #include <regex>
 #include <thread>
@@ -38,7 +51,7 @@ std::string runCommandWithProgress(const std::string& cmd, int jobId,
             std::this_thread::sleep_for(std::chrono::seconds(5));
         }
         
-        FILE* pipe = _popen(cmd.c_str(), "r");
+        FILE* pipe = POPEN(cmd.c_str(), "r");
         if (!pipe) {
             log(jobId, phase, "Erreur: impossible d'ouvrir le pipe");
             if (attempt == maxRetries) return "PIPE_FAILED";
@@ -47,26 +60,23 @@ std::string runCommandWithProgress(const std::string& cmd, int jobId,
         
         char buffer[PIPE_BUFFER_SIZE];
         std::string output;
-        output.reserve(4096);
+        // output.reserve(4096); 
         int lastPercent = -1;
         
         while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
             if (programInterrupted) {
-                _pclose(pipe);
+                PCLOSE(pipe);
                 return "INTERRUPTED";
             }
             
             std::string line(buffer);
             output += line;
             
-            // Afficher progression pour SCP avec vitesse
             if (phase == "UPLOAD") {
                 std::smatch match;
-                // Chercher pourcentage + vitesse
                 if (std::regex_search(line, match, scpSpeedRegex)) {
                     int pct = std::stoi(match[1]);
                     std::string speed = match[2].str();
-                    // Afficher tous les 10%
                     if (pct % 10 == 0 && pct != lastPercent) {
                         log(jobId, phase, std::to_string(pct) + "% - " + speed);
                         lastPercent = pct;
@@ -82,7 +92,13 @@ std::string runCommandWithProgress(const std::string& cmd, int jobId,
             }
         }
         
-        int result = _pclose(pipe);
+        int result = PCLOSE(pipe);
+        
+        // Sur Linux, il faut extraire le vrai code de retour
+        #ifndef _WIN32
+        if (WIFEXITED(result)) result = WEXITSTATUS(result);
+        #endif
+
         if (result == 0) {
             return output;
         }
@@ -96,7 +112,10 @@ std::string runCommandWithProgress(const std::string& cmd, int jobId,
 }
 
 void runBackupJob(BackupJob job, std::string zstdPath, std::string scpPath) {
+    // Thread Priority (Windows seulement)
+    #ifdef _WIN32
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    #endif
     
     std::string pathToZstd = "\"" + zstdPath + "\"";
     std::string dateStr = getCurrentDate();
@@ -150,14 +169,26 @@ void runBackupJob(BackupJob job, std::string zstdPath, std::string scpPath) {
         
         log(job.id, "COMPRESS", "Debut compression (niveau " + job.level + ")");
         
-        std::string innerCmd = "tar -cf - \"" + job.sourceDir + "\" 2>nul | " + pathToZstd + " " + zstdParams + " -q -o \"" + absArchiveStr + "\"";
-        std::string finalCmd = "cmd.exe /c \"" + innerCmd + "\"";
+        // --- COMMANDE HYBRIDE ---
+        std::string finalCmd;
+        #ifdef _WIN32
+            // Windows : On passe par cmd.exe pour gérer le pipe |
+            std::string innerCmd = "tar -cf - \"" + job.sourceDir + "\" 2>nul | " + pathToZstd + " " + zstdParams + " -q -o \"" + absArchiveStr + "\"";
+            finalCmd = "cmd.exe /c \"" + innerCmd + "\"";
+        #else
+            // Linux : Le shell par défaut gère le pipe, tar gère les erreurs via stderr
+            finalCmd = "tar -cf - \"" + job.sourceDir + "\" 2>/dev/null | " + pathToZstd + " " + zstdParams + " -q -o \"" + absArchiveStr + "\"";
+        #endif
 
         auto startComp = steady_clock::now();
-        
         int res = std::system(finalCmd.c_str());
-        
         auto endComp = steady_clock::now();
+        
+        // Décodage du code retour Linux
+        #ifndef _WIN32
+        if (WIFEXITED(res)) res = WEXITSTATUS(res);
+        #endif
+
         auto durationSec = duration_cast<seconds>(endComp - startComp).count();
         
         if (programInterrupted) {

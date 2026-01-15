@@ -1,11 +1,15 @@
-#define NOMINMAX
-#include <windows.h>
+// Header Windows
+#ifdef _WIN32
+    #define NOMINMAX
+    #include <windows.h>
+#endif
+
 #include <iostream>
 #include <vector>
 #include <string>
 #include <future>
 #include <algorithm>
-#include <signal.h>
+#include <csignal> 
 #include <filesystem>
 
 #include "config.h"
@@ -25,7 +29,9 @@ int main(int argc, char* argv[]) {
     log(-1, "SYSTEM", "Demarrage - " + std::to_string(cpuCores) + " cores CPU, " + std::to_string(availableRAM) + " MB RAM disponibles");
     
     std::string appDir = getAppDir(argv[0]);
-    std::string iniPath = appDir + "\\settings.ini";
+    
+    // Chemin universel (le slash / marche aussi sur Windows)
+    std::string iniPath = appDir + "/settings.ini";
     
     bool justConfigured = false;
 
@@ -34,7 +40,7 @@ int main(int argc, char* argv[]) {
         
         if (REMOTE_IP.empty() || SSH_KEY.empty()) {
              log(-1, "ERROR", "Configuration annulee ou invalide.");
-             std::system("pause"); return 1;
+             systemPause(); return 1;
         }
         justConfigured = true;
     } else {
@@ -46,27 +52,27 @@ int main(int argc, char* argv[]) {
 
     // Validations
     if (zstdPath.empty()) {
-        log(-1, "ERROR", "zstd.exe introuvable");
-        log(-1, "INFO", "Copie zstd.exe dans le dossier tools ou a la racine");
-        std::system("pause"); return 1;
+        log(-1, "ERROR", "zstd introuvable");
+        log(-1, "INFO", "Installez zstd (apt install zstd) ou placez le binaire dans tools/");
+        systemPause(); return 1;
     }
     
     if (scpPath.empty()) {
-        log(-1, "ERROR", "SCP introuvable. Installe OpenSSH.");
-        std::system("pause"); return 1;
+        log(-1, "ERROR", "SCP introuvable. Installez OpenSSH.");
+        systemPause(); return 1;
     }
     
     if (!fs::exists(SSH_KEY)) {
         log(-1, "ERROR", "Cle SSH introuvable: " + SSH_KEY);
-        std::system("pause"); return 1;
+        systemPause(); return 1;
     }
     
-    // Test connexion (On le fait meme apres la config pour valider immediatement)
+    // Test connexion
     log(-1, "SYSTEM", "Test connexion SSH vers " + REMOTE_IP + "...");
     if (!testSSHConnection(scpPath)) {
         log(-1, "ERROR", "Impossible de se connecter a " + REMOTE_USER + "@" + REMOTE_IP);
         log(-1, "INFO", "Verifie: cle SSH autorisee, serveur accessible, credentials corrects");
-        std::system("pause"); return 1;
+        systemPause(); return 1;
     }
     log(-1, "SYSTEM", "Connexion SSH OK!");
     
@@ -80,16 +86,15 @@ int main(int argc, char* argv[]) {
             std::cout << "============================================\n";
             std::cout << "Le programme est maintenant pret.\n\n";
             std::cout << "MODE D'EMPLOI :\n";
-            std::cout << "Glissez-deposez simplement vos dossiers de jeux\n";
-            std::cout << "sur l'icone de ce programme (backup.exe) pour lancer\n";
-            std::cout << "la sauvegarde automatique.\n\n";
-            std::cout << "Appuyez sur une touche pour quitter...\n";
-            std::system("pause > nul");
+            std::cout << "Lancez: ./backup <dossier> [niveau] (Linux)\n";
+            std::cout << "ou glissez un dossier sur l'executable (Windows)\n";
+            std::cout << "\n";
+            systemPause();
             return 0;
         } else {
             log(-1, "ERROR", "Aucun dossier a sauvegarder.");
-            log(-1, "INFO", "Usage: Glissez un dossier sur l'executable.");
-            std::system("pause"); return 1;
+            log(-1, "INFO", "Usage: ./backup <dossier> [niveau]");
+            systemPause(); return 1;
         }
     }
 
@@ -98,18 +103,7 @@ int main(int argc, char* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         std::string raw = argv[i];
-        size_t quotePos = raw.find('"');
-        if (quotePos != std::string::npos && quotePos > 0 && quotePos < raw.length() - 1) {
-            log(-1, "WARN", "Argument casse detecte, tentative de reparation...");
-            std::string part1 = raw.substr(0, quotePos);
-            std::string part2 = raw.substr(quotePos + 1);
-            
-            args.push_back(cleanArg(part1));
-            if (!part2.empty() && part2.front() == ' ') part2.erase(0, 1);
-            args.push_back(cleanArg(part2));
-        } else {
-            args.push_back(cleanArg(raw));
-        }
+        args.push_back(cleanArg(raw));
     }
 
     for (size_t i = 0; i < args.size(); ++i) {
@@ -127,22 +121,17 @@ int main(int argc, char* argv[]) {
         }
         else if (looksLikePath(currentArg)) {
             log(-1, "ERROR", "Dossier introuvable: " + currentArg);
-            log(-1, "INFO", "Verifie qu'il n'y a pas de backslash (\\) a la fin du nom");
         }
         else if (!jobs.empty()) {
             BackupJob& lastJob = jobs.back();
-            
-            if (isValidLevel(currentArg)) {
-                lastJob.level = currentArg;
-            } else {
-                lastJob.baseName = currentArg;
-            }
+            if (isValidLevel(currentArg)) lastJob.level = currentArg;
+            else lastJob.baseName = currentArg;
         }
     }
 
     if (jobs.empty()) {
         log(-1, "ERROR", "Aucune tache valide");
-        std::system("pause");
+        systemPause();
         return 1;
     }
 
@@ -193,6 +182,6 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    std::system("pause");
+    systemPause();
     return failedJobs.empty() ? 0 : 1;
 }

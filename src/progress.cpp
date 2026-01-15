@@ -9,7 +9,13 @@ std::mutex logMutex;
 std::string getCurrentTime() {
     auto now = std::time(nullptr);
     struct tm tm;
-    localtime_s(&tm, &now);
+    
+    #ifdef _WIN32
+        localtime_s(&tm, &now); // Windows (safe)
+    #else
+        localtime_r(&now, &tm); // Linux (thread-safe)
+    #endif
+
     std::ostringstream oss;
     oss << std::put_time(&tm, "%H:%M:%S");
     return oss.str();
