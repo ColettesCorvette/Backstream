@@ -1,17 +1,26 @@
 #include "utils.h"
 #include "config.h"
-#include <windows.h>
 #include <iostream>
 #include <vector>
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
 #include <ctime>
-#include <psapi.h>
 
-#pragma comment(lib, "psapi.lib")
+// --- HEADERS ---
+#ifdef _WIN32
+    #include <windows.h>
+    #include <psapi.h>
+    #pragma comment(lib, "psapi.lib")
+#else
+    #include <unistd.h>
+    #include <sys/stat.h>
+    #include <sys/sysinfo.h>
+    #include <limits>
+#endif
 
 void enableANSI() {
+#ifdef _WIN32
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD dwMode = 0;
     GetConsoleMode(hOut, &dwMode);
@@ -20,23 +29,39 @@ void enableANSI() {
     
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+#endif
+    // Sur Linux, le support ANSI est natif, rien à faire.
 }
 
 void setHighPriority() {
+#ifdef _WIN32
     SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+#else
+    // Sur Linux, augmenter la priorité demande souvent 'sudo', on ignore pour éviter les erreurs.
+#endif
 }
 
 int getCPUCoreCount() {
+#ifdef _WIN32
     SYSTEM_INFO sysinfo;
     GetSystemInfo(&sysinfo);
     return sysinfo.dwNumberOfProcessors;
+#else
+    return sysconf(_SC_NPROCESSORS_ONLN);
+#endif
 }
 
 uintmax_t getAvailableRAM() {
+#ifdef _WIN32
     MEMORYSTATUSEX memInfo;
     memInfo.dwLength = sizeof(MEMORYSTATUSEX);
     GlobalMemoryStatusEx(&memInfo);
     return memInfo.ullAvailPhys / (1024 * 1024); // MB
+#else
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long page_size = sysconf(_SC_PAGE_SIZE);
+    return (pages * page_size) / (1024 * 1024); // MB
+#endif
 }
 
 std::string getAppDir(char* argv0) {
@@ -45,12 +70,17 @@ std::string getAppDir(char* argv0) {
 }
 
 std::string findZstdPath(const std::string& appDir) {
+#ifdef _WIN32
+    std::string binName = "zstd.exe";
+#else
+    std::string binName = "zstd";
+#endif
+
     std::vector<std::string> searchPaths = {
-        appDir + "\\zstd.exe",                          // build/bin/Release
-        appDir + "\\..\\..\\..\\zstd.exe",             // racine depuis build/bin/Release
-        appDir + "\\..\\..\\..\\bin\\zstd.exe",       // bin depuis build/bin/Release
-        "C:\\Compresseur\\zstd.exe",                   // racine absolue
-        "C:\\Compresseur\\bin\\zstd.exe"              // bin absolue
+        (fs::path(appDir) / "tools" / binName).string(), // Dossier tools/ (Structure Pro)
+        (fs::path(appDir) / binName).string(),           // Racine
+        "/usr/bin/zstd",                                 // Linux standard
+        "/usr/local/bin/zstd"                            // Linux local
     };
     
     for (const auto& path : searchPaths) {
@@ -59,13 +89,22 @@ std::string findZstdPath(const std::string& appDir) {
         }
     }
     
+    // Si introuvable mais sur Linux, on renvoie juste la commande systeme
+#ifndef _WIN32
+    return "zstd"; 
+#else
     return "";
+#endif
 }
 
 std::string getCurrentDate() {
     std::time_t now = std::time(nullptr);
     std::tm ltm;
-    localtime_s(&ltm, &now);
+#ifdef _WIN32
+    localtime_s(&ltm, &now); // Version sécurisée Windows
+#else
+    localtime_r(&now, &ltm); // Version Thread-safe Linux (arguments inversés !)
+#endif
     std::stringstream ss;
     ss << (1900 + ltm.tm_year) << "-" 
        << std::setw(2) << std::setfill('0') << (1 + ltm.tm_mon) << "-" 
@@ -74,6 +113,7 @@ std::string getCurrentDate() {
 }
 
 std::string findScpPath() {
+#ifdef _WIN32
     std::vector<std::string> candidates = {
         "C:\\Windows\\Sysnative\\OpenSSH\\scp.exe", 
         "C:\\Windows\\System32\\OpenSSH\\scp.exe", 
@@ -84,6 +124,9 @@ std::string findScpPath() {
         if (fs::exists(path)) return path;
     }
     return "";
+#else
+    return "scp"; // Sur Linux, c'est standard
+#endif
 }
 
 bool hasEnoughDiskSpace(const std::string& path, uintmax_t requiredBytes) {
@@ -95,19 +138,26 @@ bool hasEnoughDiskSpace(const std::string& path, uintmax_t requiredBytes) {
     }
 }
 
-// Dans utils.cpp
-
 bool testSSHConnection(const std::string& scpPath) {
     std::string sshPath = scpPath;
-    size_t pos = sshPath.find("scp.exe");
-    if (pos != std::string::npos) {
-        sshPath.replace(pos, 7, "ssh.exe");
-    } else {
-        sshPath = "ssh";
-    }
     
-    std::string testCmd = "\"" + sshPath + "\" -i \"" + SSH_KEY + "\" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes " + REMOTE_USER + "@" + REMOTE_IP + " \"exit 0\" < NUL >nul 2>&1";
-    int result = std::system(("cmd.exe /c \"" + testCmd + "\"").c_str());
+#ifdef _WIN32
+    // Windows logic
+    size_t pos = sshPath.find("scp.exe");
+    if (pos != std::string::npos) sshPath.replace(pos, 7, "ssh.exe");
+    else sshPath = "ssh";
+    
+    // < NUL pour ne pas bloquer, >nul pour cacher la sortie
+    std::string testCmd = "cmd.exe /c \"" + sshPath + "\" -i \"" + SSH_KEY + "\" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes " + REMOTE_USER + "@" + REMOTE_IP + " \"exit 0\" < NUL >nul 2>&1";
+#else
+    // Linux logic
+    if (sshPath == "scp") sshPath = "ssh";
+    
+    // /dev/null pour cacher la sortie
+    std::string testCmd = sshPath + " -i \"" + SSH_KEY + "\" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes " + REMOTE_USER + "@" + REMOTE_IP + " \"exit 0\" >/dev/null 2>&1";
+#endif
+    
+    int result = std::system(testCmd.c_str());
     return result == 0;
 }
 
@@ -138,13 +188,23 @@ std::string getOptimalZstdParams(int level, uintmax_t availableRAM) {
     std::string params = "-" + std::to_string(level) + " --long";
     
     if (availableRAM > 16000) {
-        params += "=31"; // 2GB window
+        params += "=31"; 
     } else if (availableRAM > 8000) {
-        params += "=29"; // 512MB window
+        params += "=29"; 
     } else {
-        params += "=27"; // 128MB window
+        params += "=27"; 
     }
     
     params += " -T0";
     return params;
+}
+
+void systemPause() {
+#ifdef _WIN32
+    std::system("pause > nul");
+#else
+    std::cout << "Appuyez sur Entree pour continuer..." << std::endl;
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    std::cin.get();
+#endif
 }
