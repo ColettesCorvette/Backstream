@@ -1,5 +1,10 @@
 # BackStream
 
+![Version](https://img.shields.io/badge/version-1.0-blue)
+![Language](https://img.shields.io/badge/language-C%2B%2B17-orange)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 High-performance automated backup tool with zstd compression and secure SSH transfer for Windows and Linux.
 
 ## Overview
