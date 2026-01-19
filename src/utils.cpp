@@ -147,14 +147,14 @@ bool testSSHConnection(const std::string& scpPath) {
     if (pos != std::string::npos) sshPath.replace(pos, 7, "ssh.exe");
     else sshPath = "ssh";
     
-    // < NUL pour ne pas bloquer, >nul pour cacher la sortie
-    std::string testCmd = "cmd.exe /c \"" + sshPath + "\" -i \"" + SSH_KEY + "\" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes " + REMOTE_USER + "@" + REMOTE_IP + " \"exit 0\" < NUL >nul 2>&1";
+    // cmd.exe /c est nécessaire pour que std::system() fonctionne correctement avec des chemins contenant des espaces
+    std::string testCmd = "cmd.exe /c " + sshPath + " -i \"" + SSH_KEY + "\" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes " + REMOTE_USER + "@" + REMOTE_IP + " exit >nul 2>&1";
 #else
     // Linux logic
     if (sshPath == "scp") sshPath = "ssh";
     
     // /dev/null pour cacher la sortie
-    std::string testCmd = sshPath + " -i \"" + SSH_KEY + "\" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes " + REMOTE_USER + "@" + REMOTE_IP + " \"exit 0\" >/dev/null 2>&1";
+    std::string testCmd = sshPath + " -i \"" + SSH_KEY + "\" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes " + REMOTE_USER + "@" + REMOTE_IP + " exit >/dev/null 2>&1";
 #endif
     
     int result = std::system(testCmd.c_str());
