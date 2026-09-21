@@ -362,4 +362,4 @@ Personal project - Free to use
 
 ## Author
 
-January 2026
+Thomas Fuchs January 2026
